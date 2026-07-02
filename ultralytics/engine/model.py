@@ -757,6 +757,14 @@ class Model(torch.nn.Module):
 
         checks.check_pip_update_available()
 
+        if self.task == "fall":
+            overrides = YAML.load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
+            custom = {"data": DEFAULT_CFG_DICT["data"] or TASK2DATA[self.task], "model": self.overrides["model"], "task": self.task}
+            args = {**overrides, **custom, **kwargs, "mode": "train", "session": self.session}
+            self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks)
+            self.metrics = self.trainer.train()
+            return self.metrics
+
         overrides = YAML.load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
         custom = {
             # NOTE: handle the case when 'cfg' includes 'data'.

@@ -57,7 +57,7 @@ SOLUTION_MAP = {
 
 # Define valid tasks and modes
 MODES = frozenset({"train", "val", "predict", "export", "track", "benchmark"})
-TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic"})
+TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic", "fall"})
 TASK2DATA = {
     "detect": "coco8.yaml",
     "segment": "coco8-seg.yaml",
@@ -65,6 +65,7 @@ TASK2DATA = {
     "pose": "coco8-pose.yaml",
     "obb": "dota8.yaml",
     "semantic": "cityscapes8.yaml",
+    "fall": None,
 }
 TASK2CALIBRATIONDATA = {
     "detect": "coco128.yaml",
@@ -81,6 +82,7 @@ TASK2MODEL = {
     "pose": "yolo26n-pose.pt",
     "obb": "yolo26n-obb.pt",
     "semantic": "yolo26n-sem.pt",
+    "fall": "yolo26n-pose.pt",
 }
 TASK2METRIC = {
     "detect": "metrics/mAP50-95(B)",
@@ -89,6 +91,7 @@ TASK2METRIC = {
     "pose": "metrics/mAP50-95(P)",
     "obb": "metrics/mAP50-95(B)",
     "semantic": "metrics/mIoU",
+    "fall": "metrics/accuracy",
 }
 
 ARGV = sys.argv or ["", ""]  # sometimes sys.argv = []
@@ -184,6 +187,11 @@ CFG_FLOAT_KEYS = frozenset(
         "time",
         "workspace",
         "batch",
+        "fall_threshold",
+        "fall_min_conf",
+        "fall_grad_clip",
+        "fall_lr0",
+        "fall_train_clip_threshold",
     }
 )
 CFG_FRACTION_KEYS = frozenset(
@@ -226,6 +234,14 @@ CFG_INT_KEYS = frozenset(
         "line_width",
         "nbs",
         "save_period",
+        "fall_window",
+        "fall_stride",
+        "fall_limit",
+        "fall_min_track_len",
+        "fall_extract_workers",
+        "fall_feature_dim",
+        "fall_summary_tail",
+        "fall_train_clip_max",
     }
 )
 CFG_BOOL_KEYS = frozenset(
@@ -263,9 +279,10 @@ CFG_BOOL_KEYS = frozenset(
         "nms",
         "profile",
         "end2end",
+        "fall_overwrite_features",
+        "fall_save_train_clips",
     }
 )
-
 
 def cfg2dict(cfg: str | Path | dict | SimpleNamespace) -> dict:
     """Convert a configuration object to a dictionary.

@@ -275,6 +275,7 @@ class Results(SimpleClass, DataExportMixin):
         self.names = names
         self.path = path
         self.save_dir = None
+        self.box_extra_labels = None
         self._keys = "boxes", "masks", "probs", "keypoints", "obb", "semantic_mask"
 
     def __getitem__(self, idx):
@@ -378,6 +379,23 @@ class Results(SimpleClass, DataExportMixin):
             if v is None:
                 continue
             setattr(r, k, getattr(v, fn)(*args, **kwargs))
+        if self.box_extra_labels is not None:
+            if fn == "__getitem__" and args:
+                idx = args[0]
+                if isinstance(idx, slice):
+                    r.box_extra_labels = self.box_extra_labels[idx]
+                elif isinstance(idx, (list, tuple)):
+                    r.box_extra_labels = [self.box_extra_labels[int(i)] for i in idx]
+                elif isinstance(idx, torch.Tensor):
+                    idx = idx.cpu().numpy().tolist()
+                    r.box_extra_labels = [self.box_extra_labels[int(i)] for i in idx] if isinstance(idx, list) else [self.box_extra_labels[int(idx)]]
+                elif isinstance(idx, np.ndarray):
+                    idx = idx.tolist()
+                    r.box_extra_labels = [self.box_extra_labels[int(i)] for i in idx] if isinstance(idx, list) else [self.box_extra_labels[int(idx)]]
+                else:
+                    r.box_extra_labels = [self.box_extra_labels[int(idx)]]
+            else:
+                r.box_extra_labels = self.box_extra_labels
         return r
 
     def cpu(self):
@@ -554,6 +572,11 @@ class Results(SimpleClass, DataExportMixin):
                 c, d_conf, id = int(d.cls), float(d.conf) if conf else None, int(d.id.item()) if d.is_track else None
                 name = ("" if id is None else f"id:{id} ") + names[c]
                 label = (f"{name} {d_conf:.2f}" if conf else name) if labels else (f"{d_conf:.2f}" if conf else None)
+                extra_labels = getattr(self, "box_extra_labels", None)
+                if labels and extra_labels:
+                    extra = extra_labels[len(pred_boxes) - 1 - i]
+                    if extra:
+                        label = f"{label} {extra}" if label else extra
                 box = d.xyxyxyxy.squeeze() if is_obb else d.xyxy.squeeze()
                 annotator.box_label(
                     box,
@@ -682,7 +705,16 @@ class Results(SimpleClass, DataExportMixin):
             return f"{', '.join(f'{self.names[j]} {self.probs.data[j]:.2f}' for j in self.probs.top5)}, "
         if boxes:
             counts = boxes.cls.int().bincount()
-            return "".join(f"{n} {self.names[i]}{'s' * (n > 1)}, " for i, n in enumerate(counts) if n > 0)
+            fall_probs = getattr(self, "fall_probs", None)
+            fall_text = ""
+            if fall_probs:
+                fall_values = ", ".join(f"{float(prob):.2f}" for prob in fall_probs if prob is not None)
+                fall_text = f" (fall probs: {fall_values})" if fall_values else ""
+            return "".join(
+                f"{n} {self.names[i]}{'s' * (n > 1)}{fall_text if self.names[i] == 'person' else ''}, "
+                for i, n in enumerate(counts)
+                if n > 0
+            )
         if self.semantic_mask is not None:
             return ""
 
