@@ -57,7 +57,7 @@ SOLUTION_MAP = {
 
 # Define valid tasks and modes
 MODES = frozenset({"train", "val", "predict", "export", "track", "benchmark"})
-TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic", "fall"})
+TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic", "posefall", "segfall"})
 TASK2DATA = {
     "detect": "coco8.yaml",
     "segment": "coco8-seg.yaml",
@@ -65,7 +65,8 @@ TASK2DATA = {
     "pose": "coco8-pose.yaml",
     "obb": "dota8.yaml",
     "semantic": "cityscapes8.yaml",
-    "fall": None,
+    "posefall": None,
+    "segfall": None,
 }
 TASK2CALIBRATIONDATA = {
     "detect": "coco128.yaml",
@@ -82,7 +83,8 @@ TASK2MODEL = {
     "pose": "yolo26n-pose.pt",
     "obb": "yolo26n-obb.pt",
     "semantic": "yolo26n-sem.pt",
-    "fall": "yolo26n-pose.pt",
+    "posefall": "yolo26n-pose.pt",
+    "segfall": "yolo26n-seg.pt",
 }
 TASK2METRIC = {
     "detect": "metrics/mAP50-95(B)",
@@ -91,7 +93,8 @@ TASK2METRIC = {
     "pose": "metrics/mAP50-95(P)",
     "obb": "metrics/mAP50-95(B)",
     "semantic": "metrics/mIoU",
-    "fall": "metrics/accuracy",
+    "posefall": "metrics/accuracy",
+    "segfall": "metrics/accuracy",
 }
 
 ARGV = sys.argv or ["", ""]  # sometimes sys.argv = []
@@ -187,11 +190,16 @@ CFG_FLOAT_KEYS = frozenset(
         "time",
         "workspace",
         "batch",
-        "fall_threshold",
-        "fall_min_conf",
-        "fall_grad_clip",
-        "fall_lr0",
-        "fall_train_clip_threshold",
+        "posefall_threshold",
+        "posefall_min_conf",
+        "posefall_grad_clip",
+        "posefall_lr0",
+        "posefall_train_clip_threshold",
+        "segfall_threshold",
+        "segfall_min_conf",
+        "segfall_grad_clip",
+        "segfall_lr0",
+        "segfall_train_clip_threshold",
     }
 )
 CFG_FRACTION_KEYS = frozenset(
@@ -234,14 +242,22 @@ CFG_INT_KEYS = frozenset(
         "line_width",
         "nbs",
         "save_period",
-        "fall_window",
-        "fall_stride",
-        "fall_limit",
-        "fall_min_track_len",
-        "fall_extract_workers",
-        "fall_feature_dim",
-        "fall_summary_tail",
-        "fall_train_clip_max",
+        "posefall_window",
+        "posefall_stride",
+        "posefall_limit",
+        "posefall_min_track_len",
+        "posefall_extract_workers",
+        "posefall_feature_dim",
+        "posefall_summary_tail",
+        "posefall_train_clip_max",
+        "segfall_window",
+        "segfall_stride",
+        "segfall_limit",
+        "segfall_min_track_len",
+        "segfall_extract_workers",
+        "segfall_feature_dim",
+        "segfall_summary_tail",
+        "segfall_train_clip_max",
     }
 )
 CFG_BOOL_KEYS = frozenset(
@@ -279,8 +295,10 @@ CFG_BOOL_KEYS = frozenset(
         "nms",
         "profile",
         "end2end",
-        "fall_overwrite_features",
-        "fall_save_train_clips",
+        "posefall_overwrite_features",
+        "posefall_save_train_clips",
+        "segfall_overwrite_features",
+        "segfall_save_train_clips",
     }
 )
 

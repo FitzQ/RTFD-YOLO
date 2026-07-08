@@ -76,13 +76,13 @@ class YOLO(Model):
         else:
             # Continue with default YOLO initialization
             super().__init__(model=model, task=task, verbose=verbose)
-            if task == "fall":
-                self.task = "fall"
-                self.overrides["task"] = "fall"
+            if task in {"posefall", "segfall"}:
+                self.task = task
+                self.overrides["task"] = task
                 if hasattr(self.model, "args"):
-                    self.model.args["task"] = "fall"
+                    self.model.args["task"] = task
                 if hasattr(self.model, "task"):
-                    self.model.task = "fall"
+                    self.model.task = task
             if hasattr(self.model, "model") and "RTDETR" in self.model.model[-1]._get_name():  # if RTDETR head
                 from ultralytics import RTDETR
 
@@ -118,11 +118,17 @@ class YOLO(Model):
                 "validator": yolo.pose.PoseValidator,
                 "predictor": yolo.pose.PosePredictor,
             },
-            "fall": {
+            "posefall": {
                 "model": PoseModel,
-                "trainer": yolo.fall.FallTrainer,
-                "validator": yolo.fall.FallValidator,
-                "predictor": yolo.fall.FallPredictor,
+                "trainer": yolo.posefall.PoseFallTrainer,
+                "validator": yolo.posefall.PoseFallValidator,
+                "predictor": yolo.posefall.PoseFallPredictor,
+            },
+            "segfall": {
+                "model": SegmentationModel,
+                "trainer": yolo.segfall.SegFallTrainer,
+                "validator": yolo.segfall.SegFallValidator,
+                "predictor": yolo.segfall.SegFallPredictor,
             },
             "obb": {
                 "model": OBBModel,

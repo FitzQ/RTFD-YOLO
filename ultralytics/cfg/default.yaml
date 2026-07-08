@@ -133,29 +133,56 @@ cfg: # (str, optional) path to a config.yaml that overrides defaults
 # Tracker settings ------------------------------------------------------------------------------------------------------
 tracker: botsort.yaml # (str) tracker config: botsort.yaml, bytetrack.yaml, ocsort.yaml, deepocsort.yaml, fasttrack.yaml, tracktrack.yaml
 
-# Fall settings ---------------------------------------------------------------------------------------------------------
-fall_weights: fall26x-pose.pt # (str, optional) path to fall temporal head weights; train resumes from it when set, val/predict load it
-fall_lr0: 0.0001 # (float) initial learning rate for fall temporal head training
-fall_window: 60 # (int) temporal window length for fall clips
-fall_stride: 15 # (int) temporal stride for full-video fall evaluation
-fall_threshold: 0.5 # (float) probability threshold for fall prediction
-fall_min_conf: 0.2 # (float) minimum mean keypoint confidence for usable fall sequences
-fall_grad_clip: 1.0 # (float) max gradient norm for fall temporal head training
-feature_dir: runs/fall_features # (str) root directory for cached fall features
-train_fall_data: datasets/fall-video-dataset/Fall/Raw_Video # (str) directory containing fall videos for fall training feature extraction
-train_nofall_data: datasets/fall-video-dataset/No_Fall/Raw_Video # (str) directory containing non-fall videos for fall training feature extraction
-val_fall_data: datasets/new/Le2i/fall # (str, optional) directory containing fall videos for end-to-end fall validation
-val_nofall_data: datasets/new/Le2i/nofall # (str, optional) directory containing non-fall videos for end-to-end fall validation
-fall_out: fall26x-pose.pt # (str) output path for trained fall temporal head
-fall_limit: 0 # (int) optional limit on videos used for fall feature extraction/evaluation; 0 uses all
-fall_min_track_len: 30 # (int) minimum tracked frames required for a fall sample
-fall_extract_workers: 20 # (int) number of workers for fall feature extraction
-fall_overwrite_features: False # (bool) overwrite cached fall features
-fall_feature_dim: 56 # (int) fall feature dimension, 51 for keypoints only or 56 with body/bbox features
-fall_summary_tail: 60 # (int) tail frames summarized by the fall temporal head
-fall_tracker: fall_botsort.yaml # (str) tracker config used by fall train/val/predict when tracker is not overridden
+# PoseFall settings -----------------------------------------------------------------------------------------------------
+posefall_weights: posefall26x-pose.pt # (str, optional) path to posefall temporal head weights; train resumes from it when set, val/predict load it
+posefall_lr0: 0.0001 # (float) initial learning rate for posefall temporal head training
+posefall_window: 60 # (int) temporal window length for posefall clips
+posefall_stride: 5 # (int) temporal stride for full-video posefall evaluation
+posefall_threshold: 0.5 # (float) probability threshold for fall prediction
+posefall_min_conf: 0.2 # (float) minimum mean keypoint confidence for usable posefall sequences
+posefall_grad_clip: 1.0 # (float) max gradient norm for posefall temporal head training
+posefall_feature_dir: runs/posefall/features # (str) root directory for cached posefall features
+posefall_train_fall_data: datasets/new/omnifall/fall # (str) directory containing fall videos for posefall training feature extraction
+posefall_train_nofall_data: datasets/new/omnifall/nofall # (str) directory containing non-fall videos for posefall training feature extraction
+posefall_val_fall_data: datasets/new/omnifall/fall # (str, optional) directory containing fall videos for end-to-end posefall validation
+posefall_val_nofall_data: datasets/new/omnifall/nofall # (str, optional) directory containing non-fall videos for end-to-end posefall validation
+posefall_out: posefall26x-pose.pt # (str) output path for trained posefall temporal head
+posefall_limit: 0 # (int) optional limit on videos used for posefall feature extraction/evaluation; 0 uses all
+posefall_min_track_len: 30 # (int) minimum tracked frames required for a posefall sample
+posefall_extract_workers: 20 # (int) number of workers for posefall feature extraction
+posefall_overwrite_features: False # (bool) overwrite cached posefall features
+posefall_feature_dim: 56 # (int) posefall feature dimension, 51 for keypoints only or 56 with body/bbox features
+posefall_summary_tail: 60 # (int) tail frames summarized by the posefall temporal head
+posefall_tracker: posefall_botsort.yaml # (str) tracker config used by posefall train/val/predict when tracker is not overridden
 
-fall_save_train_clips: True # (bool) save train-set windows predicted as fall after the final epoch
-fall_train_clip_dir: runs/fall/train_pred_clips # (str) output directory for saved train-set fall windows
-fall_train_clip_threshold: 0.5 # (float) probability threshold for saving predicted fall train clips
-fall_train_clip_max: 0 # (int) maximum number of predicted fall train clips to save; 0 saves all
+posefall_save_train_clips: False # (bool) save train-set windows predicted as fall after the final epoch
+posefall_train_clip_dir: runs/posefall/train_pred_clips # (str) output directory for saved train-set posefall windows
+posefall_train_clip_threshold: 0.5 # (float) probability threshold for saving predicted fall train clips
+posefall_train_clip_max: 0 # (int) maximum number of predicted fall train clips to save; 0 saves all
+
+# SegFall settings ------------------------------------------------------------------------------------------------------
+segfall_weights: segfall26n.pt # (str, optional) path to segfall temporal head weights; empty trains from scratch
+segfall_lr0: 0.0001 # (float) initial learning rate for segfall temporal head training
+segfall_window: 60 # (int) temporal window length for segfall clips
+segfall_stride: 15 # (int) temporal stride for full-video segfall evaluation
+segfall_threshold: 0.5 # (float) probability threshold for fall prediction
+segfall_min_conf: 0.2 # (float) minimum segmentation sequence validity for usable segfall sequences
+segfall_grad_clip: 1.0 # (float) max gradient norm for segfall temporal head training
+segfall_feature_dir: runs/segfall/features # (str) root directory for cached segfall features
+segfall_train_fall_data: datasets/fall-video-dataset/Fall/Raw_Video # (str) directory containing fall videos for segfall training feature extraction
+segfall_train_nofall_data: datasets/fall-video-dataset/No_Fall/Raw_Video # (str) directory containing non-fall videos for segfall training feature extraction
+segfall_val_fall_data: datasets/new/Le2i/fall # (str, optional) directory containing fall videos for end-to-end segfall validation
+segfall_val_nofall_data: datasets/new/Le2i/nofall # (str, optional) directory containing non-fall videos for end-to-end segfall validation
+segfall_out: segfall26n.pt # (str) output path for trained segfall temporal head
+segfall_limit: 0 # (int) optional limit on videos used for segfall feature extraction/evaluation; 0 uses all
+segfall_min_track_len: 30 # (int) minimum tracked frames required for a segfall sample
+segfall_extract_workers: 20 # (int) number of workers for segfall feature extraction
+segfall_overwrite_features: False # (bool) overwrite cached segfall features
+segfall_feature_dim: 24 # (int) segfall feature dimension from bbox/mask geometry and motion
+segfall_summary_tail: 60 # (int) tail frames summarized by the segfall temporal head
+segfall_tracker: segfall_botsort.yaml # (str) tracker config used by segfall train/val/predict when tracker is not overridden
+
+segfall_save_train_clips: False # (bool) save train-set windows predicted as fall after the final epoch
+segfall_train_clip_dir: runs/segfall/train_pred_clips # (str) output directory for saved train-set segfall windows
+segfall_train_clip_threshold: 0.5 # (float) probability threshold for saving predicted fall train clips
+segfall_train_clip_max: 0 # (int) maximum number of predicted fall train clips to save; 0 saves all

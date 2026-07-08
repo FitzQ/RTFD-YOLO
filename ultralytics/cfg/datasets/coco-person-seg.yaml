@@ -1,0 +1,12 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# COCO 2017 person-only instance segmentation dataset derived from coco.yaml.
+# Labels keep only class 0 (person) segmentation polygons from COCO.
+
+path: datasets/coco-person-seg
+train: train2017.txt
+val: val2017.txt
+test:
+
+names:
+  0: person

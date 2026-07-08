@@ -757,7 +757,7 @@ class Model(torch.nn.Module):
 
         checks.check_pip_update_available()
 
-        if self.task == "fall":
+        if self.task in {"fall", "posefall", "segfall"}:
             overrides = YAML.load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
             custom = {"data": DEFAULT_CFG_DICT["data"] or TASK2DATA[self.task], "model": self.overrides["model"], "task": self.task}
             args = {**overrides, **custom, **kwargs, "mode": "train", "session": self.session}

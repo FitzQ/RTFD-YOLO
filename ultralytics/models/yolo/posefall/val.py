@@ -14,7 +14,7 @@ import torch
 from ultralytics.cfg import get_cfg
 from ultralytics.utils import DEFAULT_CFG, DEFAULT_CFG_DICT, LOGGER
 
-from .model import FALL_CENTER_Y_INDEX, FALL_FEATURE_DIM, load_fall_head, mean_keypoint_confidence, normalize_keypoints
+from .model import POSEFALL_CENTER_Y_INDEX, POSEFALL_FEATURE_DIM, load_posefall_head, mean_keypoint_confidence, normalize_keypoints
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
 NEGATIVE_TOKENS = {"no_fall", "nofall", "nonfall", "notfall", "not_fall", "adl", "normal", "negative", "0"}
@@ -97,13 +97,16 @@ def _video_items_from_dirs(fall_dir: str | Path, nofall_dir: str | Path, limit: 
 
 
 def _video_items_from_args(args, limit: int = 0) -> list[VideoItem]:
-    fall_data = getattr(args, "val_fall_data", None)
-    nofall_data = getattr(args, "val_nofall_data", None)
+    fall_data = getattr(args, "posefall_val_fall_data", None)
+    nofall_data = getattr(args, "posefall_val_nofall_data", None)
     if fall_data and nofall_data:
         return _video_items_from_dirs(fall_data, nofall_data, limit=limit)
     data = getattr(args, "data", None)
     if not data:
-        raise ValueError("fall val requires val_fall_data=/path/to/Fall val_nofall_data=/path/to/No_Fall or data=/path/to/labeled/video_dataset")
+        raise ValueError(
+            "posefall val requires posefall_val_fall_data=/path/to/Fall "
+            "posefall_val_nofall_data=/path/to/No_Fall or data=/path/to/labeled/video_dataset"
+        )
     return _video_items(data, limit=limit)
 
 
@@ -113,11 +116,11 @@ def _track_ids(result, count: int) -> list[int | None]:
     return list(range(count))
 
 
-def _fall_tracker_arg(args) -> str:
+def _posefall_tracker_arg(args) -> str:
     tracker = getattr(args, "tracker", None)
     if tracker and tracker != DEFAULT_CFG_DICT.get("tracker"):
         return tracker
-    return getattr(args, "fall_tracker", None) or tracker or "fall_botsort.yaml"
+    return getattr(args, "posefall_tracker", None) or tracker or "posefall_botsort.yaml"
 
 
 def _safe_stem(value: str) -> str:
@@ -131,7 +134,7 @@ def _opencv_safe_video(video: Path) -> Path:
     """
     if video.suffix.lower() != ".avi":
         return video
-    cache_dir = Path("runs/fall/video_cache")
+    cache_dir = Path("runs/posefall/video_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha1(str(video.resolve()).encode()).hexdigest()[:12]
     cached = cache_dir / f"{digest}_{_safe_stem(video.stem)}.mp4"
@@ -172,11 +175,11 @@ def _opencv_safe_video(video: Path) -> Path:
     return cached
 
 
-class FallValidator:
-    """End-to-end video-level fall validator.
+class PoseFallValidator:
+    """End-to-end pose-based video-level fall validator.
 
-    This validator starts from raw videos, runs YOLO pose tracking, converts the main tracked person to fall features,
-    and evaluates the trained fall head as a binary video classifier.
+    This validator starts from raw videos, runs YOLO pose tracking, converts the main tracked person to posefall
+    features, and evaluates the trained posefall head as a binary video classifier.
     """
 
     def __init__(self, args=None, _callbacks: dict | None = None):
@@ -188,16 +191,16 @@ class FallValidator:
         from ultralytics import YOLO
 
         device = getattr(self.args, "device", None)
-        feature_dim = int(getattr(self.args, "fall_feature_dim", FALL_FEATURE_DIM))
-        min_track_len = int(getattr(self.args, "fall_min_track_len", 30))
-        min_conf = float(getattr(self.args, "fall_min_conf", 0.2))
-        threshold = float(getattr(self.args, "fall_threshold", 0.5))
-        limit = int(getattr(self.args, "fall_limit", 0))
+        feature_dim = int(getattr(self.args, "posefall_feature_dim", POSEFALL_FEATURE_DIM))
+        min_track_len = int(getattr(self.args, "posefall_min_track_len", 30))
+        min_conf = float(getattr(self.args, "posefall_min_conf", 0.2))
+        threshold = float(getattr(self.args, "posefall_threshold", 0.5))
+        limit = int(getattr(self.args, "posefall_limit", 0))
         items = _video_items_from_args(self.args, limit=limit)
 
         pose_model = YOLO(getattr(self.args, "model", "yolo26n-pose.pt"), task="pose")
         torch_device = torch.device(f"cuda:{device}" if str(device).isdigit() else device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
-        fall_head, config = load_fall_head(getattr(self.args, "fall_weights", None), torch_device)
+        posefall_head, config = load_posefall_head(getattr(self.args, "posefall_weights", None), torch_device)
         expected_dim = int(config.get("input_dim", feature_dim))
 
         rows = []
@@ -205,7 +208,7 @@ class FallValidator:
         for i, item in enumerate(items, 1):
             prob, reason = self._predict_video(
                 pose_model,
-                fall_head,
+                posefall_head,
                 item.path,
                 torch_device,
                 feature_dim=expected_dim,
@@ -215,16 +218,17 @@ class FallValidator:
             pred = int(prob >= threshold) if prob is not None else 0
             rows.append({"path": str(item.path), "label": item.label, "pred": pred, "prob": prob, "reason": reason})
             LOGGER.info(
-                f"fall val {i}/{len(items)} label={item.label} pred={pred} "
+                f"posefall val {i}/{len(items)} label={item.label} pred={pred} "
                 f"prob={prob if prob is not None else 'None'} reason={reason} {item.path}"
             )
 
         self.metrics = self._compute_metrics(rows, threshold=threshold, elapsed=time.time() - start)
         self._save_rows(rows)
         LOGGER.info(
-            "fall val: "
+            "posefall val: "
             f"accuracy={self.metrics['accuracy']:.4f} precision={self.metrics['precision']:.4f} "
             f"recall={self.metrics['recall']:.4f} f1={self.metrics['f1']:.4f} "
+            f"p90={self.metrics['p90']:.4f} p95={self.metrics['p95']:.4f} competition_map={self.metrics['competition_map']:.2f} "
             f"tp={self.metrics['tp']} fp={self.metrics['fp']} tn={self.metrics['tn']} fn={self.metrics['fn']}"
         )
         return self.metrics
@@ -232,7 +236,7 @@ class FallValidator:
     def _predict_video(
         self,
         pose_model,
-        fall_head,
+        posefall_head,
         video: Path,
         device,
         feature_dim: int,
@@ -253,7 +257,7 @@ class FallValidator:
             vid_stride=int(getattr(self.args, "vid_stride", 1)),
             conf=getattr(self.args, "conf", None),
             iou=getattr(self.args, "iou", None),
-            tracker=_fall_tracker_arg(self.args),
+            tracker=_posefall_tracker_arg(self.args),
             save=False,
             verbose=False,
         ):
@@ -275,8 +279,8 @@ class FallValidator:
                 if track_id is None:
                     continue
                 tracks.setdefault(track_id, []).append(feat)
-                if feat.shape[0] > FALL_CENTER_Y_INDEX:
-                    previous_center_y[track_id] = float(feat[FALL_CENTER_Y_INDEX])
+                if feat.shape[0] > POSEFALL_CENTER_Y_INDEX:
+                    previous_center_y[track_id] = float(feat[POSEFALL_CENTER_Y_INDEX])
 
         candidates = []
         for frames in tracks.values():
@@ -297,9 +301,9 @@ class FallValidator:
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
         seq = candidates[0][2]
         with torch.no_grad():
-            prob = float(fall_head(seq.to(device)).sigmoid().item())
-        window = int(getattr(fall_head, "window", getattr(self.args, "fall_window", 60)))
-        stride = int(getattr(fall_head, "stride", getattr(self.args, "fall_stride", 15)))
+            prob = float(posefall_head(seq.to(device)).sigmoid().item())
+        window = int(getattr(posefall_head, "window", getattr(self.args, "posefall_window", 60)))
+        stride = int(getattr(posefall_head, "stride", getattr(self.args, "posefall_stride", 15)))
         clips = 1 if seq.shape[0] <= window else ((seq.shape[0] - window) // stride + 1 + int((seq.shape[0] - window) % stride != 0))
         return prob, f"track_len={seq.shape[0]} clips={clips} candidates={len(candidates)}"
 
@@ -313,11 +317,16 @@ class FallValidator:
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-12)
+        competition = PoseFallValidator._competition_metrics(
+            [int(row["label"]) for row in rows],
+            [float(row["prob"]) if row["prob"] is not None else 0.0 for row in rows],
+        )
         return {
             "accuracy": (tp + tn) / total,
             "precision": precision,
             "recall": recall,
             "f1": f1,
+            **competition,
             "tp": tp,
             "fp": fp,
             "tn": tn,
@@ -327,12 +336,34 @@ class FallValidator:
             "seconds": elapsed,
         }
 
+    @staticmethod
+    def _competition_metrics(targets: list[int], probs: list[float]) -> dict[str, float]:
+        def precision_at_recall(min_recall: float) -> float:
+            positives = sum(1 for y in targets if y == 1)
+            if positives <= 0:
+                return 0.0
+            tp = fp = 0
+            best = 0.0
+            for prob, target in sorted(zip(probs, targets), key=lambda item: item[0], reverse=True):
+                if target == 1:
+                    tp += 1
+                else:
+                    fp += 1
+                recall = tp / positives
+                if recall >= min_recall:
+                    best = max(best, tp / max(tp + fp, 1))
+            return best
+
+        p90 = precision_at_recall(0.90)
+        p95 = precision_at_recall(0.95)
+        return {"p90": p90, "p95": p95, "competition_map": (p90 + p95) * 50.0}
+
     def _save_rows(self, rows: list[dict]) -> None:
-        save_dir = Path(getattr(self.args, "save_dir", None) or "runs/fall/val")
+        save_dir = Path(getattr(self.args, "save_dir", None) or "runs/posefall/val")
         save_dir.mkdir(parents=True, exist_ok=True)
         out = save_dir / "predictions.csv"
         with out.open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["path", "label", "pred", "prob", "reason"])
             writer.writeheader()
             writer.writerows(rows)
-        LOGGER.info(f"fall val predictions saved to {out}")
+        LOGGER.info(f"posefall val predictions saved to {out}")

@@ -1,0 +1,15 @@
+{
+  "pipeline": "posefall",
+  "pose_model": "yolo26n-pose.pt",
+  "pose_onnx": "exports/posefall26n/pose_yolo.onnx",
+  "posefall_weights": "posefall26n-pose.pt",
+  "posefall_head_onnx": "exports/posefall26n/posefall_head.onnx",
+  "feature_dim": 56,
+  "window": 60,
+  "stride": 5,
+  "output": "fall_prob sigmoid probability, threshold normally 0.5 unless tuned on validation set",
+  "notes": [
+    "This exports the two neural-network parts only.",
+    "Video decode, YOLO postprocess, tracking, posefall feature normalization, missing-frame fill, sliding windows, and video-level aggregation remain in deployment code."
+  ]
+}
