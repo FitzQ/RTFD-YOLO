@@ -1,0 +1,36 @@
+# COCO 2017 person images with both pose and segmentation labels.
+# Built with: python tools/build_coco_pose_seg_dataset.py
+
+path: datasets/coco-person-pose-seg
+train: train2017.txt
+val: val2017.txt
+test:
+
+pose_labels: labels_pose
+seg_labels: labels_seg
+
+kpt_shape: [17, 3]
+flip_idx: [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
+
+names:
+  0: person
+
+kpt_names:
+  0:
+    - nose
+    - left_eye
+    - right_eye
+    - left_ear
+    - right_ear
+    - left_shoulder
+    - right_shoulder
+    - left_elbow
+    - right_elbow
+    - left_wrist
+    - right_wrist
+    - left_hip
+    - right_hip
+    - left_knee
+    - right_knee
+    - left_ankle
+    - right_ankle

@@ -57,6 +57,7 @@ from ultralytics.nn.modules import (
     LRPCHead,
     Pose,
     Pose26,
+    PoseSeg26,
     RepC3,
     RepConv,
     RepNCSPELAN4,
@@ -79,6 +80,7 @@ from ultralytics.utils.checks import REMOTE_FILE_PREFIXES, check_file, check_req
 from ultralytics.utils.loss import (
     E2ELoss,
     PoseLoss26,
+    PoseSegLoss,
     SemanticSegmentationLoss,
     v8ClassificationLoss,
     v8DetectionLoss,
@@ -695,6 +697,22 @@ class PoseModel(DetectionModel):
     def init_criterion(self):
         """Initialize the loss criterion for the PoseModel."""
         return E2ELoss(self, PoseLoss26) if getattr(self, "end2end", False) else v8PoseLoss(self)
+
+
+class PoseSegModel(DetectionModel):
+    """YOLO26 model with shared backbone/neck and joint person pose and segmentation outputs."""
+
+    def __init__(self, cfg="yolo26n-poseg.yaml", ch=3, nc=None, data_kpt_shape=(None, None), verbose=True):
+        if not isinstance(cfg, dict):
+            cfg = yaml_model_load(cfg)
+        if any(data_kpt_shape) and list(data_kpt_shape) != list(cfg["kpt_shape"]):
+            LOGGER.info(f"Overriding model.yaml kpt_shape={cfg['kpt_shape']} with kpt_shape={data_kpt_shape}")
+            cfg["kpt_shape"] = data_kpt_shape
+        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+        self.kpt_shape = self.yaml["kpt_shape"]
+
+    def init_criterion(self):
+        return PoseSegLoss(self)
 
 
 class ClassificationModel(BaseModel):
@@ -1789,6 +1807,7 @@ def parse_model(d, ch, verbose=True):
                 YOLOESegment26,
                 Pose,
                 Pose26,
+                PoseSeg26,
                 OBB,
                 OBB26,
             }
@@ -1796,7 +1815,21 @@ def parse_model(d, ch, verbose=True):
             args.extend([reg_max, end2end, [ch[x] for x in f]])
             if m is Segment or m is YOLOESegment or m is Segment26 or m is YOLOESegment26:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, Segment26, YOLOESegment, YOLOESegment26, Pose, Pose26, OBB, OBB26}:
+            if m is PoseSeg26:
+                args[3] = make_divisible(min(args[3], max_channels) * width, 8)
+            if m in {
+                Detect,
+                YOLOEDetect,
+                Segment,
+                Segment26,
+                YOLOESegment,
+                YOLOESegment26,
+                Pose,
+                Pose26,
+                PoseSeg26,
+                OBB,
+                OBB26,
+            }:
                 m.legacy = legacy
         elif m is SemanticSegment:
             args.append([ch[x] for x in f])  # nc, ch tuple

@@ -578,19 +578,24 @@ class Results(SimpleClass, DataExportMixin):
                     if extra:
                         label = f"{label} {extra}" if label else extra
                 box = d.xyxyxyxy.squeeze() if is_obb else d.xyxy.squeeze()
+                color = colors(
+                    c
+                    if color_mode == "class"
+                    else id
+                    if id is not None
+                    else i
+                    if color_mode == "instance"
+                    else None,
+                    True,
+                )
+                if extra_labels:
+                    extra = extra_labels[len(pred_boxes) - 1 - i]
+                    if isinstance(extra, str) and extra.startswith("FALL"):
+                        color = (0, 0, 255)  # BGR red
                 annotator.box_label(
                     box,
                     label,
-                    color=colors(
-                        c
-                        if color_mode == "class"
-                        else id
-                        if id is not None
-                        else i
-                        if color_mode == "instance"
-                        else None,
-                        True,
-                    ),
+                    color=color,
                 )
 
         # Plot Classify results

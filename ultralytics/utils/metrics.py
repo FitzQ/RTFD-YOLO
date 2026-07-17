@@ -1563,6 +1563,79 @@ class PoseMetrics(DetMetrics):
         return summary
 
 
+class PoseSegMetrics(PoseMetrics):
+    """Aggregate box, pose, and instance-mask AP metrics for a joint model."""
+
+    def __init__(self, names: dict[int, str] = {}):
+        super().__init__(names)
+        self.seg = Metric()
+        self.stats["tp_m"] = []
+
+    def update_stats(self, stat: dict[str, Any]) -> None:
+        super().update_stats(stat)
+        self.seg.update_image_metrics(stat["tp_m"], stat["target_cls"], stat["pred_cls"], stat["im_name"])
+
+    def clear_image_metrics(self) -> None:
+        super().clear_image_metrics()
+        self.seg.clear_image_metrics()
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+        stats = DetMetrics.process(self, save_dir, plot, on_plot=on_plot)
+        for key, metric, prefix in (("tp_p", self.pose, "Pose"), ("tp_m", self.seg, "Mask")):
+            results = ap_per_class(
+                stats[key],
+                stats["conf"],
+                stats["pred_cls"],
+                stats["target_cls"],
+                plot=plot,
+                on_plot=on_plot,
+                save_dir=save_dir,
+                names=self.names,
+                prefix=prefix,
+            )[2:]
+            metric.nc = len(self.names)
+            metric.update(results)
+        return stats
+
+    @property
+    def keys(self) -> list[str]:
+        return [
+            *PoseMetrics.keys.fget(self),
+            "metrics/precision(M)",
+            "metrics/recall(M)",
+            "metrics/mAP50(M)",
+            "metrics/mAP50-95(M)",
+        ]
+
+    def mean_results(self) -> list[float]:
+        return PoseMetrics.mean_results(self) + self.seg.mean_results()
+
+    def class_result(self, i: int) -> list[float]:
+        return PoseMetrics.class_result(self, i) + self.seg.class_result(i)
+
+    @property
+    def maps(self) -> np.ndarray:
+        return PoseMetrics.maps.fget(self) + self.seg.maps
+
+    @property
+    def fitness(self) -> float:
+        return PoseMetrics.fitness.fget(self) + self.seg.fitness()
+
+    @property
+    def curves(self) -> list[str]:
+        return [
+            *PoseMetrics.curves.fget(self),
+            "Precision-Recall(M)",
+            "F1-Confidence(M)",
+            "Precision-Confidence(M)",
+            "Recall-Confidence(M)",
+        ]
+
+    @property
+    def curves_results(self) -> list[list]:
+        return PoseMetrics.curves_results.fget(self) + self.seg.curves_results
+
+
 class ClassifyMetrics(SimpleClass, DataExportMixin):
     """Class for computing classification metrics including top-1 and top-5 accuracy.
 

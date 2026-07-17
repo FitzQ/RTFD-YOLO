@@ -83,11 +83,11 @@ class YOLODataset(BaseDataset):
             *args (Any): Additional positional arguments for the parent class.
             **kwargs (Any): Additional keyword arguments for the parent class.
         """
-        self.use_segments = task == "segment"
-        self.use_keypoints = task == "pose"
+        self.use_segments = task in {"segment", "poseg"}
+        self.use_keypoints = task in {"pose", "poseg"}
         self.use_obb = task == "obb"
         self.data = data
-        assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
+        assert task == "poseg" or not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
@@ -310,6 +310,80 @@ class YOLODataset(BaseDataset):
                 new_batch["batch_idx"][i] += i  # add target image index for build_targets()
             new_batch["batch_idx"] = torch.cat(new_batch["batch_idx"], 0)
         return new_batch
+
+
+class PoseSegDataset(YOLODataset):
+    """YOLO dataset that aligns person segmentation polygons with pose instances from separate label trees."""
+
+    def __init__(self, *args, data: dict | None = None, **kwargs):
+        kwargs.pop("task", None)
+        super().__init__(*args, data=data, task="poseg", **kwargs)
+
+    @staticmethod
+    def _segment_box(segment: np.ndarray) -> np.ndarray:
+        xy_min, xy_max = segment.min(0), segment.max(0)
+        return np.array(
+            [(xy_min[0] + xy_max[0]) / 2, (xy_min[1] + xy_max[1]) / 2, xy_max[0] - xy_min[0], xy_max[1] - xy_min[1]],
+            dtype=np.float32,
+        )
+
+    @staticmethod
+    def _box_iou_xywh(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
+        def xyxy(boxes):
+            result = np.empty_like(boxes)
+            result[:, :2] = boxes[:, :2] - boxes[:, 2:] / 2
+            result[:, 2:] = boxes[:, :2] + boxes[:, 2:] / 2
+            return result
+
+        a, b = xyxy(boxes1), xyxy(boxes2)
+        inter = np.maximum(0, np.minimum(a[:, None, 2:], b[None, :, 2:]) - np.maximum(a[:, None, :2], b[None, :, :2]))
+        inter = inter.prod(2)
+        area_a = np.maximum(0, a[:, 2:] - a[:, :2]).prod(1)[:, None]
+        area_b = np.maximum(0, b[:, 2:] - b[:, :2]).prod(1)[None]
+        return inter / np.maximum(area_a + area_b - inter, 1e-9)
+
+    def get_labels(self) -> list[dict]:
+        labels = super().get_labels()
+        data_root = Path(self.data["path"])
+        if not data_root.is_absolute():
+            data_root = (Path.cwd() / data_root).resolve()
+        seg_root = data_root / self.data.get("seg_labels", "labels_seg")
+        matched_instances = total_instances = 0
+        for label in labels:
+            image = Path(label["im_file"])
+            split = image.parent.name
+            seg_file = seg_root / split / f"{image.stem}.txt"
+            segments = []
+            if seg_file.is_file():
+                for line in seg_file.read_text(encoding="utf-8").splitlines():
+                    values = np.asarray(line.split(), dtype=np.float32)
+                    if len(values) >= 7 and int(values[0]) == 0:
+                        segments.append(values[1:].reshape(-1, 2))
+            pose_boxes = label["bboxes"]
+            total_instances += len(pose_boxes)
+            if not len(pose_boxes) or not segments:
+                keep = np.zeros(len(pose_boxes), dtype=bool)
+                matched_segments = []
+            else:
+                seg_boxes = np.stack([self._segment_box(segment) for segment in segments])
+                ious = self._box_iou_xywh(pose_boxes, seg_boxes)
+                keep = np.zeros(len(pose_boxes), dtype=bool)
+                matched_segments = []
+                used = set()
+                for pose_idx in range(len(pose_boxes)):
+                    candidates = np.argsort(ious[pose_idx])[::-1]
+                    seg_idx = next((int(idx) for idx in candidates if int(idx) not in used), None)
+                    if seg_idx is not None and ious[pose_idx, seg_idx] >= 0.5:
+                        keep[pose_idx] = True
+                        used.add(seg_idx)
+                        matched_segments.append(segments[seg_idx])
+            label["cls"] = label["cls"][keep]
+            label["bboxes"] = label["bboxes"][keep]
+            label["keypoints"] = label["keypoints"][keep]
+            label["segments"] = matched_segments
+            matched_instances += int(keep.sum())
+        LOGGER.info(f"PoseSeg labels: matched {matched_instances}/{total_instances} pose instances to person masks")
+        return labels
 
 
 class YOLOMultiModalDataset(YOLODataset):

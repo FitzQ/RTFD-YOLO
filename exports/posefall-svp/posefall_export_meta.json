@@ -1,0 +1,22 @@
+{
+  "pipeline": "posefall",
+  "target": "Hi3516CV610_SVP",
+  "weights": "runs/posefall/train-6/weights/best.pt",
+  "pose_onnx": "pose_yolo.onnx",
+  "posefall_head_onnx": "posefall_head.onnx",
+  "feature_dim": 56,
+  "window": 60,
+  "stride": 15,
+  "threshold": 0.5,
+  "min_conf": 0.2,
+  "target_fps": 30.0,
+  "max_gap_seconds": 0.5,
+  "imgsz": 640,
+  "pose_end2end": false,
+  "output": "fall_prob sigmoid probability, threshold normally 0.5 unless tuned on validation set",
+  "notes": [
+    "posefall_onnx_runtime.py connects video decode, pose tracking, feature tensorization, missing-frame fill, and temporal-head inference.",
+    "The runtime reports a full video as fall when any evaluated window reaches the configured threshold.",
+    "ffmpeg is required only for legacy AVI input."
+  ]
+}

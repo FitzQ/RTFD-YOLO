@@ -25,6 +25,7 @@ __all__ = (
     "Classify",
     "Detect",
     "Pose",
+    "PoseSeg26",
     "RTDETRDecoder",
     "Segment",
     "SemanticSegment",
@@ -778,6 +779,93 @@ class Pose26(Pose):
             y[:, 0::ndim] = (y[:, 0::ndim] + self.anchors[0]) * self.strides
             y[:, 1::ndim] = (y[:, 1::ndim] + self.anchors[1]) * self.strides
             return y
+
+
+class PoseSeg26(Pose26):
+    """YOLO26 head sharing detection outputs while predicting instance masks and human keypoints."""
+
+    def __init__(
+        self,
+        nc: int = 1,
+        kpt_shape: tuple = (17, 3),
+        nm: int = 32,
+        npr: int = 256,
+        reg_max: int = 1,
+        end2end: bool = True,
+        ch: tuple = (),
+    ):
+        super().__init__(nc, kpt_shape, reg_max, end2end, ch)
+        self.nm = nm
+        self.npr = npr
+        self.proto = Proto26(ch, self.npr, self.nm, nc)
+        c5 = max(ch[0] // 4, self.nm)
+        self.cv5 = nn.ModuleList(
+            nn.Sequential(Conv(x, c5, 3), Conv(c5, c5, 3), nn.Conv2d(c5, self.nm, 1)) for x in ch
+        )
+        if end2end:
+            self.one2one_cv5 = copy.deepcopy(self.cv5)
+
+    @property
+    def one2many(self):
+        heads = super().one2many
+        heads["mask_head"] = self.cv5
+        return heads
+
+    @property
+    def one2one(self):
+        heads = super().one2one
+        heads["mask_head"] = self.one2one_cv5
+        return heads
+
+    def forward_head(
+        self,
+        x: list[torch.Tensor],
+        box_head: torch.nn.Module,
+        cls_head: torch.nn.Module,
+        pose_head: torch.nn.Module,
+        kpts_head: torch.nn.Module,
+        kpts_sigma_head: torch.nn.Module,
+        mask_head: torch.nn.Module,
+    ) -> dict[str, torch.Tensor]:
+        preds = super().forward_head(x, box_head, cls_head, pose_head, kpts_head, kpts_sigma_head)
+        if mask_head is not None:
+            bs = x[0].shape[0]
+            preds["mask_coefficient"] = torch.cat(
+                [mask_head[i](x[i]).view(bs, self.nm, -1) for i in range(self.nl)], 2
+            )
+        return preds
+
+    def forward(self, x: list[torch.Tensor]):
+        outputs = Detect.forward(self, x)
+        preds = outputs[1] if isinstance(outputs, tuple) else outputs
+        proto = self.proto(x)
+        if isinstance(preds, dict):
+            if self.end2end:
+                preds["one2many"]["proto"] = proto
+                preds["one2one"]["proto"] = (
+                    tuple(item.detach() for item in proto) if isinstance(proto, tuple) else proto.detach()
+                )
+            else:
+                preds["proto"] = proto
+        if self.training:
+            return preds
+        return (outputs, proto) if self.export else ((outputs[0], proto), preds)
+
+    def _inference(self, x: dict[str, torch.Tensor]) -> torch.Tensor:
+        detection = Detect._inference(self, x)
+        return torch.cat([detection, x["mask_coefficient"], self.kpts_decode(x["kpts"])], dim=1)
+
+    def postprocess(self, preds: torch.Tensor) -> torch.Tensor:
+        boxes, scores, masks, kpts = preds.split([4, self.nc, self.nm, self.nk], dim=-1)
+        scores, conf, idx = self.get_topk_index(scores, self.max_det)
+        boxes = boxes.gather(1, idx.repeat(1, 1, 4))
+        masks = masks.gather(1, idx.repeat(1, 1, self.nm))
+        kpts = kpts.gather(1, idx.repeat(1, 1, self.nk))
+        return torch.cat([boxes, scores, conf, masks, kpts], dim=-1)
+
+    def fuse(self) -> None:
+        super().fuse()
+        self.cv5 = None
 
 
 class Classify(nn.Module):

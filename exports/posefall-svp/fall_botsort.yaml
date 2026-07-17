@@ -1,8 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-# BoT-SORT settings for posefall feature extraction on fixed-camera, single-subject videos.
-# GMC is disabled to avoid sparse optical-flow failures on variable-size/decoded frames
-# and to reduce overhead during bulk keypoint extraction.
+# BoT-SORT settings for fixed-camera, single-subject Fall videos.
+# GMC is disabled to avoid sparse optical-flow failures and reduce bulk extraction overhead.
 
 tracker_type: botsort
 track_high_thresh: 0.25

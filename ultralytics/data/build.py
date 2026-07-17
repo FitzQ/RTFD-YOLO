@@ -249,6 +249,10 @@ def build_yolo_dataset(
         else:
             dataset = PolygonSemanticDataset
         pad = 0.0  # no pad for semantic
+    elif cfg.task == "poseg":
+        from ultralytics.data.dataset import PoseSegDataset
+
+        dataset = PoseSegDataset
     elif multi_modal:
         dataset = YOLOMultiModalDataset
     else:

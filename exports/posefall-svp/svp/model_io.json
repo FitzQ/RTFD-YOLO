@@ -1,0 +1,46 @@
+{
+  "soc_version": "Hi3516CV610",
+  "pose": {
+    "onnx": "../pose_yolo.onnx",
+    "om": "model/pose_yolo_original.om",
+    "input": {
+      "name": "images",
+      "dtype": "float32",
+      "shape": [
+        1,
+        3,
+        640,
+        640
+      ]
+    },
+    "output": {
+      "layout": "decoded_pose_candidates",
+      "shape": [
+        1,
+        56,
+        8400
+      ]
+    },
+    "postprocess": "Run confidence filtering/NMS and tracking on the ARM CPU."
+  },
+  "posefall_head": {
+    "onnx": "../posefall_head.onnx",
+    "om": "model/posefall_head_original.om",
+    "input": {
+      "name": "features",
+      "dtype": "float32",
+      "shape": [
+        1,
+        60,
+        56
+      ]
+    },
+    "output": {
+      "name": "fall_prob",
+      "dtype": "float32",
+      "shape": [
+        1
+      ]
+    }
+  }
+}

@@ -1201,6 +1201,28 @@ class E2ELoss:
         return max(1 - x / max(self.one2one.hyp.epochs - 1, 1), 0) * (self.o2m_copy - self.final_o2m) + self.final_o2m
 
 
+class PoseSegLoss:
+    """Joint pose and instance-segmentation criterion for a shared YOLO26 detection head."""
+
+    def __init__(self, model: torch.nn.Module):
+        loss_wrapper = E2ELoss if getattr(model, "end2end", False) else None
+        self.pose = loss_wrapper(model, PoseLoss26) if loss_wrapper else PoseLoss26(model)
+        self.segment = loss_wrapper(model, v8SegmentationLoss) if loss_wrapper else v8SegmentationLoss(model)
+
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        pose_total, pose_items = self.pose(preds, batch)
+        seg_total, seg_items = self.segment(preds, batch)
+        # Box/class/DFL predictions and targets are shared, so retain them once from the pose criterion.
+        seg_specific = torch.stack((seg_total[1], seg_total[4]))
+        seg_specific_items = torch.stack((seg_items[1], seg_items[4]))
+        return torch.cat((pose_total, seg_specific)), torch.cat((pose_items, seg_specific_items))
+
+    def update(self) -> None:
+        for criterion in (self.pose, self.segment):
+            if hasattr(criterion, "update"):
+                criterion.update()
+
+
 class TVPDetectLoss:
     """Criterion class for computing training losses for text-visual prompt detection."""
 

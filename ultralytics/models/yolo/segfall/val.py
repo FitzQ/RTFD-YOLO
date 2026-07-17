@@ -3,18 +3,29 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import subprocess
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 
-from ultralytics.cfg import get_cfg
-from ultralytics.utils import DEFAULT_CFG, DEFAULT_CFG_DICT, LOGGER
+from ultralytics.models.yolo.fall_engine import FallValidator
+from ultralytics.models.yolo.fall_utils import (
+    fall_device,
+    fall_tracker_arg,
+    fall_yolo_model,
+    feature_cache_path,
+    opencv_safe_video,
+    resample_track,
+    resolve_feature_cache_key,
+    video_classification_metrics,
+    video_fps,
+)
+from ultralytics.utils import LOGGER, TQDM
 
-from .model import SEGFALL_FEATURE_DIM, load_segfall_head, mean_segment_confidence, normalize_segments, segment_state
+from .model import SEGFALL_FEATURE_DIM, mean_segment_confidence, segment_result_features
+from .train import _extract_one_video, _load_track_sequences, segfall_feature_settings
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".m4v"}
 NEGATIVE_TOKENS = {"no_fall", "nofall", "nonfall", "notfall", "not_fall", "adl", "normal", "negative", "0"}
@@ -97,15 +108,15 @@ def _video_items_from_dirs(fall_dir: str | Path, nofall_dir: str | Path, limit: 
 
 
 def _video_items_from_args(args, limit: int = 0) -> list[VideoItem]:
-    fall_data = getattr(args, "segfall_val_fall_data", None)
-    nofall_data = getattr(args, "segfall_val_nofall_data", None)
+    fall_data = getattr(args, "fall_val_fall_data", None)
+    nofall_data = getattr(args, "fall_val_nofall_data", None)
     if fall_data and nofall_data:
         return _video_items_from_dirs(fall_data, nofall_data, limit=limit)
     data = getattr(args, "data", None)
     if not data:
         raise ValueError(
-            "segfall val requires segfall_val_fall_data=/path/to/Fall "
-            "segfall_val_nofall_data=/path/to/No_Fall or data=/path/to/labeled/video_dataset"
+            "segfall val requires fall_val_fall_data=/path/to/Fall "
+            "fall_val_nofall_data=/path/to/No_Fall or data=/path/to/labeled/video_dataset"
         )
     return _video_items(data, limit=limit)
 
@@ -116,126 +127,119 @@ def _track_ids(result, count: int) -> list[int | None]:
     return list(range(count))
 
 
-def _segfall_tracker_arg(args) -> str:
-    tracker = getattr(args, "tracker", None)
-    if tracker and tracker != DEFAULT_CFG_DICT.get("tracker"):
-        return tracker
-    return getattr(args, "segfall_tracker", None) or tracker or "segfall_botsort.yaml"
-
-
-def _safe_stem(value: str) -> str:
-    return "".join(c if c.isalnum() or c in {"-", "_", "."} else "_" for c in value)
-
-
-def _opencv_safe_video(video: Path) -> Path:
-    """Transcode legacy AVI files to cached MP4 before OpenCV/YOLO reads them.
-
-    Some Le2i AVI files contain raw BGR video plus malformed MP3 audio; OpenCV may segfault before Python can catch it.
-    """
-    if video.suffix.lower() != ".avi":
-        return video
-    cache_dir = Path("runs/segfall/video_cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha1(str(video.resolve()).encode()).hexdigest()[:12]
-    cached = cache_dir / f"{digest}_{_safe_stem(video.stem)}.mp4"
-    if cached.exists() and cached.stat().st_size > 0:
-        return cached
-    tmp = cached.with_suffix(".mp4.part")
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(video),
-        "-map",
-        "0:v:0",
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
-        "-pix_fmt",
-        "yuv420p",
-        "-f",
-        "mp4",
-        str(tmp),
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError as e:
-        raise RuntimeError(f"ffmpeg is required to validate legacy AVI videos such as {video}") from e
-    except subprocess.CalledProcessError as e:
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"Failed to transcode AVI video for validation: {video}") from e
-    tmp.rename(cached)
-    return cached
-
-
-class SegFallValidator:
+class SegFallValidator(FallValidator):
     """End-to-end segmentation-based video-level fall validator.
 
     This validator starts from raw videos, runs YOLO segmentation tracking, converts the main tracked person to segfall
     features, and evaluates the trained segfall head as a binary video classifier.
     """
 
-    def __init__(self, args=None, _callbacks: dict | None = None):
-        self.args = get_cfg(DEFAULT_CFG, args or {})
-        self.callbacks = _callbacks
-        self.metrics = {}
+    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None):
+        super().__init__(dataloader=dataloader, save_dir=save_dir, args=args, _callbacks=_callbacks)
 
-    def __call__(self, model=None):
-        from ultralytics import YOLO
-
+    def __call__(self, trainer=None, model=None):
+        if trainer is not None:
+            return self.validate_cached(trainer)
         device = getattr(self.args, "device", None)
         feature_dim = int(getattr(self.args, "segfall_feature_dim", SEGFALL_FEATURE_DIM))
-        min_track_len = int(getattr(self.args, "segfall_min_track_len", 30))
-        min_conf = float(getattr(self.args, "segfall_min_conf", 0.2))
-        threshold = float(getattr(self.args, "segfall_threshold", 0.5))
-        limit = int(getattr(self.args, "segfall_limit", 0))
+        min_track_len = int(getattr(self.args, "fall_min_track_len", 30))
+        min_conf = float(getattr(self.args, "fall_min_conf", 0.2))
+        threshold = float(getattr(self.args, "fall_threshold", 0.5))
+        limit = int(getattr(self.args, "fall_limit", 0))
         items = _video_items_from_args(self.args, limit=limit)
 
-        seg_model = YOLO(getattr(self.args, "model", "yolo26n-seg.pt"), task="segment")
-        torch_device = torch.device(f"cuda:{device}" if str(device).isdigit() else device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
-        segfall_head, config = load_segfall_head(getattr(self.args, "segfall_weights", None), torch_device)
+        seg_model = fall_yolo_model(model, getattr(self.args, "model", "segfall26n.pt"), task="segment")
+        torch_device = fall_device(device)
+        segfall_head = getattr(seg_model.model, "segfall_head", None)
         if segfall_head is None:
-            raise ValueError("segfall val requires segfall_weights=/path/to/segfall_head.pt")
+            raise ValueError("segfall val requires complete SegFall weights containing `segfall_head`")
+        segfall_head = segfall_head.float().to(torch_device).eval()
+        config = getattr(seg_model.model, "segfall_config", {})
         expected_dim = int(config.get("input_dim", feature_dim))
+        self.fall_target_fps = float(config.get("target_fps", getattr(self.args, "fall_target_fps", 30.0)))
+        self.fall_max_gap_seconds = float(config.get("max_gap_seconds", getattr(self.args, "fall_max_gap_seconds", 0.5)))
+        settings = segfall_feature_settings(self.args)
+        feature_key = resolve_feature_cache_key(
+            self.args, seg_model, "segfall", "segfall_feature_key", settings
+        )
+        self.args.segfall_feature_key = feature_key
+        feature_dir = Path(getattr(self.args, "segfall_feature_dir", None) or "runs/segfall/features") / feature_key
+        end2end = bool(getattr(self.args, "fall_val_end2end", True))
+        if end2end:
+            LOGGER.info("Running SegFall end-to-end validation from decoded videos")
+        else:
+            LOGGER.info(f"Using shared SegFall feature cache: {feature_dir}")
 
         rows = []
+        processed_frames = 0
+        processing_seconds = 0.0
         start = time.time()
-        for i, item in enumerate(items, 1):
-            prob, reason = self._predict_video(
-                seg_model,
-                segfall_head,
-                item.path,
-                torch_device,
-                feature_dim=expected_dim,
-                min_track_len=min_track_len,
-                min_conf=min_conf,
-            )
-            pred = int(prob >= threshold) if prob is not None else 0
+        self.run_callbacks("on_val_start")
+        description = "SegFall end-to-end val" if end2end else "SegFall cached val"
+        for i, item in TQDM(enumerate(items, 1), total=len(items), desc=description, unit="video"):
+            self.run_callbacks("on_val_batch_start")
+            if end2end:
+                if torch_device.type == "cuda":
+                    torch.cuda.synchronize(torch_device)
+                video_start = time.perf_counter()
+                prob, reason, frames = self._predict_video_end2end(
+                    seg_model,
+                    segfall_head,
+                    item.path,
+                    torch_device,
+                    feature_dim=expected_dim,
+                    min_track_len=min_track_len,
+                    min_conf=min_conf,
+                )
+                if torch_device.type == "cuda":
+                    torch.cuda.synchronize(torch_device)
+                processing_seconds += time.perf_counter() - video_start
+                processed_frames += frames
+            else:
+                prob, reason = self._predict_video_cached(
+                    seg_model,
+                    segfall_head,
+                    item,
+                    feature_dir,
+                    torch_device,
+                    feature_dim=expected_dim,
+                    min_track_len=min_track_len,
+                    min_conf=min_conf,
+                )
+            pred = int(prob >= threshold) if prob is not None else None
             rows.append({"path": str(item.path), "label": item.label, "pred": pred, "prob": prob, "reason": reason})
-            LOGGER.info(
+            LOGGER.debug(
                 f"segfall val {i}/{len(items)} label={item.label} pred={pred} "
                 f"prob={prob if prob is not None else 'None'} reason={reason} {item.path}"
             )
+            self.run_callbacks("on_val_batch_end")
 
         self.metrics = self._compute_metrics(rows, threshold=threshold, elapsed=time.time() - start)
+        self.metrics["end2end"] = end2end
+        if end2end:
+            self.metrics["processed_frames"] = processed_frames
+            self.metrics["processing_seconds"] = processing_seconds
+            self.metrics["ms_per_frame"] = 1000.0 * processing_seconds / max(processed_frames, 1)
+            self.metrics["processing_fps"] = processed_frames / max(processing_seconds, 1e-12)
         self._save_rows(rows)
+        self._save_metrics()
         LOGGER.info(
             "segfall val: "
             f"accuracy={self.metrics['accuracy']:.4f} precision={self.metrics['precision']:.4f} "
             f"recall={self.metrics['recall']:.4f} f1={self.metrics['f1']:.4f} "
             f"p90={self.metrics['p90']:.4f} p95={self.metrics['p95']:.4f} competition_map={self.metrics['competition_map']:.2f} "
-            f"tp={self.metrics['tp']} fp={self.metrics['fp']} tn={self.metrics['tn']} fn={self.metrics['fn']}"
+            f"tp={self.metrics['tp']} fp={self.metrics['fp']} tn={self.metrics['tn']} fn={self.metrics['fn']} "
+            f"coverage={self.metrics['coverage']:.4f} ({self.metrics['valid_videos']}/{self.metrics['videos']})"
         )
+        if end2end:
+            LOGGER.info(
+                f"segfall end-to-end speed: frames={processed_frames} time={processing_seconds:.3f}s "
+                f"ms/frame={self.metrics['ms_per_frame']:.3f} FPS={self.metrics['processing_fps']:.2f}"
+            )
+        self.run_callbacks("on_val_end")
         return self.metrics
 
-    def _predict_video(
+    def _predict_video_end2end(
         self,
         seg_model,
         segfall_head,
@@ -245,101 +249,110 @@ class SegFallValidator:
         min_track_len: int,
         min_conf: float,
     ):
-        source_video = _opencv_safe_video(video)
+        source_video = opencv_safe_video(video, "segfall")
         tracks: dict[int, list[torch.Tensor]] = {}
-        previous_state: dict[int, dict[str, float]] = {}
-        last_frame_idx: dict[int, int] = {}
-        last_feat: dict[int, torch.Tensor] = {}
-        frames_seen = 0
-        segment_frames = 0
+        track_frame_indices: dict[int, list[int]] = {}
+        frames_seen = segment_frames = 0
         frame_step = max(int(getattr(self.args, "vid_stride", 1) or 1), 1)
-        for processed_frame_idx, result in enumerate(seg_model.track(
-            source=str(source_video),
-            stream=True,
-            persist=True,
-            device=getattr(self.args, "device", None),
-            imgsz=int(getattr(self.args, "imgsz", 640)),
-            vid_stride=int(getattr(self.args, "vid_stride", 1)),
-            conf=getattr(self.args, "conf", None),
-            iou=getattr(self.args, "iou", None),
-            tracker=_segfall_tracker_arg(self.args),
-            save=False,
-            verbose=False,
-        )):
+        for processed_frame_idx, result in enumerate(
+            seg_model.track(
+                source=str(source_video),
+                stream=True,
+                persist=False,
+                device=getattr(self.args, "device", None),
+                imgsz=int(getattr(self.args, "imgsz", 640)),
+                vid_stride=int(getattr(self.args, "vid_stride", 1)),
+                conf=getattr(self.args, "conf", None),
+                iou=getattr(self.args, "iou", None),
+                tracker=fall_tracker_arg(self.args),
+                save=False,
+                verbose=False,
+            )
+        ):
             frame_idx = processed_frame_idx * frame_step
             frames_seen += 1
             if result.boxes is None or len(result.boxes) == 0 or result.masks is None:
                 continue
             segment_frames += 1
-            ids = _track_ids(result, len(result.boxes))
-            boxes_xywhn = result.boxes.xywhn.detach().cpu() if result.boxes is not None else None
-            confs = result.boxes.conf.detach().cpu() if result.boxes is not None and result.boxes.conf is not None else None
-            prev = [previous_state.get(track_id) if track_id is not None else None for track_id in ids]
-            feats = normalize_segments(boxes_xywhn, result.masks.xy, result.orig_shape, conf=confs, previous_state=prev, feature_dim=feature_dim)
-            for track_id, feat in zip(ids, feats):
-                if track_id is None:
-                    continue
-                if track_id in last_frame_idx and track_id in last_feat:
-                    for _missing_idx in range(last_frame_idx[track_id] + 1, frame_idx):
-                        tracks.setdefault(track_id, []).append(last_feat[track_id].clone())
-                tracks.setdefault(track_id, []).append(feat)
-                last_frame_idx[track_id] = frame_idx
-                last_feat[track_id] = feat.detach().clone()
-                previous_state[track_id] = segment_state(feat)
+            feats = segment_result_features(result, device="cpu")
+            if feats.shape[1] != feature_dim:
+                return None, f"feature_dim={feats.shape[1]} expected={feature_dim}", frames_seen
+            for track_id, feat in zip(_track_ids(result, len(feats)), feats):
+                if track_id is not None:
+                    tracks.setdefault(track_id, []).append(feat)
+                    track_frame_indices.setdefault(track_id, []).append(frame_idx)
 
         candidates = []
-        for frames in tracks.values():
-            if len(frames) < min_track_len:
-                continue
-            seq = torch.stack(frames)
-            conf = mean_segment_confidence(seq)
-            if conf >= min_conf:
-                candidates.append((seq.shape[0], conf, seq))
+        source_fps = video_fps(source_video)
+        for track_id, frames in tracks.items():
+            segments = resample_track(
+                frames,
+                track_frame_indices[track_id],
+                source_fps,
+                self.fall_target_fps,
+                self.fall_max_gap_seconds,
+            )
+            for sequence, _ in segments:
+                confidence = mean_segment_confidence(sequence)
+                if len(sequence) >= min_track_len and confidence >= min_conf:
+                    candidates.append((len(sequence), confidence, sequence))
         if not candidates:
-            if frames_seen == 0:
-                return None, "decode_failed_or_empty_video"
-            if segment_frames == 0:
-                return None, f"no_segments frames={frames_seen}"
-            track_lengths = sorted((len(frames) for frames in tracks.values()), reverse=True)
-            longest = track_lengths[0] if track_lengths else 0
-            return None, f"no_valid_track frames={frames_seen} segment_frames={segment_frames} tracks={len(tracks)} longest={longest}"
-        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        seq = candidates[0][2]
+            reason = "decode_failed_or_empty_video" if not frames_seen else f"no_valid_track segment_frames={segment_frames}"
+            return None, reason, frames_seen
+        candidates.sort(key=lambda value: (value[0], value[1]), reverse=True)
+        sequence = candidates[0][2]
+        with torch.no_grad():
+            probability = float(segfall_head(sequence.to(device)).sigmoid().item())
+        window, stride = int(segfall_head.window), int(segfall_head.stride)
+        clips = 1 if len(sequence) <= window else ((len(sequence) - window) // stride + 1 + int((len(sequence) - window) % stride != 0))
+        return probability, f"track_len={len(sequence)} clips={clips} candidates={len(candidates)}", frames_seen
+
+    def _predict_video_cached(
+        self,
+        seg_model,
+        segfall_head,
+        item: VideoItem,
+        feature_dir: Path,
+        device,
+        feature_dim: int,
+        min_track_len: int,
+        min_conf: float,
+    ):
+        path = feature_cache_path(feature_dir, "Fall" if item.label else "No_Fall", item.path)
+        cache_hit = path.is_file() and not bool(getattr(self.args, "fall_overwrite_features", False))
+        _extract_one_video(
+            seg_model,
+            (item.path, item.label),
+            feature_dir,
+            getattr(self.args, "device", None),
+            int(getattr(self.args, "imgsz", 640)),
+            int(getattr(self.args, "vid_stride", 1)),
+            getattr(self.args, "conf", None),
+            getattr(self.args, "iou", None),
+            fall_tracker_arg(self.args),
+            bool(getattr(self.args, "fall_overwrite_features", False)),
+            min_track_len,
+            min_conf,
+        )
+        if not path.is_file():
+            return None, "no_valid_feature_cache"
+        try:
+            sequences = _load_track_sequences(
+                [path], min_track_len, min_conf, feature_dim, self.fall_target_fps, self.fall_max_gap_seconds
+            )
+        except (ValueError, RuntimeError, OSError) as error:
+            return None, f"invalid_feature_cache: {error}"
+        seq = sequences[0].sequence
         with torch.no_grad():
             prob = float(segfall_head(seq.to(device)).sigmoid().item())
-        window = int(getattr(segfall_head, "window", getattr(self.args, "segfall_window", 60)))
-        stride = int(getattr(segfall_head, "stride", getattr(self.args, "segfall_stride", 15)))
+        window = int(getattr(segfall_head, "window", getattr(self.args, "fall_window", 60)))
+        stride = int(getattr(segfall_head, "stride", getattr(self.args, "fall_stride", 15)))
         clips = 1 if seq.shape[0] <= window else ((seq.shape[0] - window) // stride + 1 + int((seq.shape[0] - window) % stride != 0))
-        return prob, f"track_len={seq.shape[0]} clips={clips} candidates={len(candidates)}"
+        return prob, f"cache={'hit' if cache_hit else 'created'} track_len={seq.shape[0]} clips={clips}"
 
     @staticmethod
     def _compute_metrics(rows: list[dict], threshold: float, elapsed: float) -> dict:
-        tp = sum(row["label"] == 1 and row["pred"] == 1 for row in rows)
-        tn = sum(row["label"] == 0 and row["pred"] == 0 for row in rows)
-        fp = sum(row["label"] == 0 and row["pred"] == 1 for row in rows)
-        fn = sum(row["label"] == 1 and row["pred"] == 0 for row in rows)
-        total = max(len(rows), 1)
-        precision = tp / max(tp + fp, 1)
-        recall = tp / max(tp + fn, 1)
-        f1 = 2 * precision * recall / max(precision + recall, 1e-12)
-        competition = SegFallValidator._competition_metrics(
-            [int(row["label"]) for row in rows],
-            [float(row["prob"]) if row["prob"] is not None else 0.0 for row in rows],
-        )
-        return {
-            "accuracy": (tp + tn) / total,
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            **competition,
-            "tp": tp,
-            "fp": fp,
-            "tn": tn,
-            "fn": fn,
-            "videos": len(rows),
-            "threshold": threshold,
-            "seconds": elapsed,
-        }
+        return video_classification_metrics(rows, threshold, elapsed, SegFallValidator._competition_metrics)
 
     @staticmethod
     def _competition_metrics(targets: list[int], probs: list[float]) -> dict[str, float]:
@@ -364,7 +377,7 @@ class SegFallValidator:
         return {"p90": p90, "p95": p95, "competition_map": (p90 + p95) * 50.0}
 
     def _save_rows(self, rows: list[dict]) -> None:
-        save_dir = Path(getattr(self.args, "save_dir", None) or "runs/segfall/val")
+        save_dir = Path(self.save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         out = save_dir / "predictions.csv"
         with out.open("w", newline="") as f:
@@ -372,3 +385,9 @@ class SegFallValidator:
             writer.writeheader()
             writer.writerows(rows)
         LOGGER.info(f"segfall val predictions saved to {out}")
+
+    def _save_metrics(self) -> None:
+        out = Path(self.save_dir) / "metrics.json"
+        with out.open("w") as file:
+            json.dump(self.metrics, file, indent=2)
+        LOGGER.info(f"segfall val metrics saved to {out}")

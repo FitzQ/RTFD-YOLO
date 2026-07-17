@@ -57,12 +57,14 @@ SOLUTION_MAP = {
 
 # Define valid tasks and modes
 MODES = frozenset({"train", "val", "predict", "export", "track", "benchmark"})
-TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic", "posefall", "segfall"})
+TASKS = frozenset({"detect", "segment", "classify", "pose", "poseg", "posegfall", "obb", "semantic", "posefall", "segfall"})
 TASK2DATA = {
     "detect": "coco8.yaml",
     "segment": "coco8-seg.yaml",
     "classify": "imagenet10",
     "pose": "coco8-pose.yaml",
+    "poseg": "coco-person-pose-seg.yaml",
+    "posegfall": None,
     "obb": "dota8.yaml",
     "semantic": "cityscapes8.yaml",
     "posefall": None,
@@ -73,6 +75,7 @@ TASK2CALIBRATIONDATA = {
     "segment": "coco128-seg.yaml",
     "classify": "imagenet100",
     "pose": "coco8-pose.yaml",
+    "poseg": "coco-person-pose-seg.yaml",
     "obb": "dota128.yaml",
     "semantic": "cityscapes8.yaml",
 }
@@ -81,6 +84,8 @@ TASK2MODEL = {
     "segment": "yolo26n-seg.pt",
     "classify": "yolo26n-cls.pt",
     "pose": "yolo26n-pose.pt",
+    "poseg": "yolo26n-poseg.yaml",
+    "posegfall": "yolo26n-poseg.pt",
     "obb": "yolo26n-obb.pt",
     "semantic": "yolo26n-sem.pt",
     "posefall": "yolo26n-pose.pt",
@@ -91,6 +96,8 @@ TASK2METRIC = {
     "segment": "metrics/mAP50-95(M)",
     "classify": "metrics/accuracy_top1",
     "pose": "metrics/mAP50-95(P)",
+    "poseg": "metrics/mAP50-95(P)",
+    "posegfall": "metrics/accuracy",
     "obb": "metrics/mAP50-95(B)",
     "semantic": "metrics/mIoU",
     "posefall": "metrics/accuracy",
@@ -190,16 +197,16 @@ CFG_FLOAT_KEYS = frozenset(
         "time",
         "workspace",
         "batch",
-        "posefall_threshold",
-        "posefall_min_conf",
-        "posefall_grad_clip",
-        "posefall_lr0",
-        "posefall_train_clip_threshold",
-        "segfall_threshold",
-        "segfall_min_conf",
-        "segfall_grad_clip",
-        "segfall_lr0",
-        "segfall_train_clip_threshold",
+        "fall_threshold",
+        "fall_target_fps",
+        "fall_max_gap_seconds",
+        "fall_min_conf",
+        "fall_grad_clip",
+        "fall_lr0",
+        "fall_negative_clip_weight",
+        "fall_warmup_bias_lr",
+        "fall_positive_clip_weight",
+        "fall_temporal_smooth_weight",
     }
 )
 CFG_FRACTION_KEYS = frozenset(
@@ -242,22 +249,15 @@ CFG_INT_KEYS = frozenset(
         "line_width",
         "nbs",
         "save_period",
-        "posefall_window",
-        "posefall_stride",
-        "posefall_limit",
-        "posefall_min_track_len",
-        "posefall_extract_workers",
+        "fall_window",
+        "fall_stride",
+        "fall_limit",
+        "fall_min_track_len",
+        "fall_extract_workers",
+        "fall_positive_topk",
         "posefall_feature_dim",
-        "posefall_summary_tail",
-        "posefall_train_clip_max",
-        "segfall_window",
-        "segfall_stride",
-        "segfall_limit",
-        "segfall_min_track_len",
-        "segfall_extract_workers",
+        "posegfall_feature_dim",
         "segfall_feature_dim",
-        "segfall_summary_tail",
-        "segfall_train_clip_max",
     }
 )
 CFG_BOOL_KEYS = frozenset(
@@ -295,12 +295,11 @@ CFG_BOOL_KEYS = frozenset(
         "nms",
         "profile",
         "end2end",
-        "posefall_overwrite_features",
-        "posefall_save_train_clips",
-        "segfall_overwrite_features",
-        "segfall_save_train_clips",
+        "fall_overwrite_features",
+        "fall_val_end2end",
     }
 )
+
 
 def cfg2dict(cfg: str | Path | dict | SimpleNamespace) -> dict:
     """Convert a configuration object to a dictionary.

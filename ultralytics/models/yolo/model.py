@@ -15,6 +15,7 @@ from ultralytics.nn.tasks import (
     DetectionModel,
     OBBModel,
     PoseModel,
+    PoseSegModel,
     SegmentationModel,
     SemanticSegmentationModel,
     WorldModel,
@@ -76,7 +77,7 @@ class YOLO(Model):
         else:
             # Continue with default YOLO initialization
             super().__init__(model=model, task=task, verbose=verbose)
-            if task in {"posefall", "segfall"}:
+            if task in {"posefall", "poseg", "posegfall", "segfall"}:
                 self.task = task
                 self.overrides["task"] = task
                 if hasattr(self.model, "args"):
@@ -117,6 +118,18 @@ class YOLO(Model):
                 "trainer": yolo.pose.PoseTrainer,
                 "validator": yolo.pose.PoseValidator,
                 "predictor": yolo.pose.PosePredictor,
+            },
+            "poseg": {
+                "model": PoseSegModel,
+                "trainer": yolo.poseg.PoseSegTrainer,
+                "validator": yolo.poseg.PoseSegValidator,
+                "predictor": yolo.poseg.PoseSegPredictor,
+            },
+            "posegfall": {
+                "model": PoseSegModel,
+                "trainer": yolo.posegfall.PoseSegFallTrainer,
+                "validator": yolo.posegfall.PoseSegFallValidator,
+                "predictor": yolo.posegfall.PoseSegFallPredictor,
             },
             "posefall": {
                 "model": PoseModel,
