@@ -1,0 +1,28 @@
+{
+  "split": {
+    "train": [
+      3101,
+      2641
+    ],
+    "val": [
+      774,
+      629
+    ]
+  },
+  "best": {
+    "samples": 1403,
+    "label_accuracy": 0.8816820979118347,
+    "precision": 0.9026086956521739,
+    "recall": 0.8251192368839427,
+    "f1": 0.8621262458471761,
+    "teacher_mae": 0.15032461285591125,
+    "teacher_class_agreement": 0.8995010852813721,
+    "student_probability_mean": 0.43271490931510925,
+    "teacher_probability_mean": 0.4314972460269928,
+    "epoch": 15,
+    "train_loss": 0.28649235542997253
+  },
+  "window": 60,
+  "feature_dim": 56,
+  "architecture": "Flatten-Linear(3360,128)-ReLU-Linear(128,32)-ReLU-Linear(32,1)-Sigmoid"
+}

@@ -148,10 +148,10 @@ fall_target_fps: 30.0 # (float) normalized FPS seen by all temporal fall heads
 fall_max_gap_seconds: 0.5 # (float) split a track when detections disappear longer than this
 fall_optimizer: AdamW # (str) default optimizer for temporal fall heads; explicit optimizer= overrides this
 fall_warmup_bias_lr: 0.0 # (float) temporal-head bias warmup start; explicit warmup_bias_lr= overrides this
-fall_train_fall_data: datasets/new/fall-video-dataset/fall # (str) fall training videos
-fall_train_nofall_data: datasets/new/fall-video-dataset/nofall # (str) non-fall training videos
-fall_val_fall_data: datasets/new/Le2i/fall # (str) fall videos used by end-to-end validation
-fall_val_nofall_data: datasets/new/Le2i/nofall # (str) non-fall videos used by end-to-end validation
+fall_train_fall_data: datasets/new/all/fall # (str) fall training videos
+fall_train_nofall_data: datasets/new/all/nofall # (str) non-fall training videos
+fall_val_fall_data:  # (str) fall videos used by end-to-end validation
+fall_val_nofall_data:  # (str) non-fall videos used by end-to-end validation
 fall_limit: 0 # (int) optional per-task video limit; 0 uses all
 fall_min_track_len: 30 # (int) minimum tracked sequence length
 fall_extract_workers: 20 # (int) feature extraction processes

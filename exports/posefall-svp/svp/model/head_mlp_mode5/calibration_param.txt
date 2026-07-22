@@ -1,0 +1,95 @@
+version: 65536
+layer {
+  name: "features"
+  calc_data_type: S8
+  quant_param {
+    input {
+      data_type: F32
+      scale: 254.999985
+      offset: -128
+    }
+  }
+}
+layer {
+  name: "/model/net/net.0/Flatten"
+  calc_data_type: S8
+  quant_param {
+    input {
+      data_type: S8
+      scale: 254.999985
+      offset: -128
+    }
+  }
+}
+layer {
+  name: "/model/net/net.1/Gemm"
+  calc_data_type: S8
+  quant_param {
+    input {
+      data_type: S8
+      scale: 254.999985
+      offset: -128
+    }
+    weight {
+      data_type: S8
+      scale: 869.861145
+    }
+  }
+}
+layer {
+  name: "/model/net/net.3/Gemm"
+  calc_data_type: S8
+  quant_param {
+    input {
+      data_type: S8
+      scale: 5.0192585
+      offset: -128
+    }
+    weight {
+      data_type: S8
+      scale: 908.489136
+    }
+  }
+}
+layer {
+  name: "/model/net/net.5/Gemm"
+  calc_data_type: S8
+  quant_param {
+    input {
+      data_type: S8
+      scale: 11.8791075
+      offset: -128
+    }
+    weight {
+      data_type: S8
+      scale: 615.909485
+    }
+  }
+}
+layer {
+  name: "/model/Squeeze"
+  calc_data_type: F16
+  quant_param {
+    input {
+      data_type: F16
+      scale: 23.5398254
+      offset: -1
+    }
+  }
+}
+layer {
+  name: "/Sigmoid"
+  calc_data_type: F16
+  quant_param {
+    input {
+      data_type: F16
+      scale: 23.5398254
+      offset: -1
+    }
+    output {
+      data_type: F16
+      scale: 257.276245
+      offset: -129
+    }
+  }
+}

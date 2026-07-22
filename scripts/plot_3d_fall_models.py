@@ -1,7 +1,9 @@
-"""Plot latency–model size–MAP trade-offs for fall-detection models.
+"""Plot the audited latency–model size–MAP trade-off for fall detection.
 
-Replace the example values in the DATA DEFINITION section with measured data,
-then run:
+The six values below correspond to the saved best checkpoints from the common
+fall-video-dataset architecture-selection experiment.  Latency is a raw
+vision-front-end CUDA kernel measurement on the development TITAN RTX; it is
+neither application end-to-end latency nor Hi3516CV610 latency.  Run:
 
     python plot_3d_fall_models.py
 
@@ -15,24 +17,27 @@ from matplotlib.lines import Line2D
 
 
 # =============================================================================
-# DATA DEFINITION — replace these example values with your real measurements.
-# Units used below: latency = ms/image, size = million parameters (M), MAP = %.
+# DATA DEFINITION — audited on 2026-07-22; see
+# runs/model_family_comparison/model_family_audit.json.
+# Units: raw front-end latency = mean ms/image (batch 1, FP16, 640×640,
+# 50 warm-ups + 300 timed iterations with torch.cuda.Event); size = total
+# checkpoint model parameters in millions; MAP = saved-best internal-val score.
 # =============================================================================
-pose_n_latency, pose_n_size, pose_n_map = 18.0, 3.5, 86.0
-pose_s_latency, pose_s_size, pose_s_map = 31.0, 11.2, 91.5
+pose_n_latency, pose_n_size, pose_n_map = 14.819, 4.947546, 97.58788
+pose_s_latency, pose_s_size, pose_s_map = 14.813, 13.077434, 96.28549
 
-seg_n_latency, seg_n_size, seg_n_map = 22.0, 4.1, 84.5
-seg_s_latency, seg_s_size, seg_s_map = 38.0, 12.8, 90.0
+seg_n_latency, seg_n_size, seg_n_map = 15.198, 4.374539, 88.68564
+seg_s_latency, seg_s_size, seg_s_map = 15.588, 12.755947, 87.48694
 
-poseg_n_latency, poseg_n_size, poseg_n_map = 26.0, 5.2, 89.5
-poseg_s_latency, poseg_s_size, poseg_s_map = 45.0, 15.6, 94.0
+poseg_n_latency, poseg_n_size, poseg_n_map = 17.022, 5.982699, 92.61648
+poseg_s_latency, poseg_s_size, poseg_s_map = 17.315, 15.049547, 94.19420
 
 
 # View and output settings.
 ELEVATION = 24       # Vertical viewing angle in degrees.
 AZIMUTH = -55        # Horizontal viewing angle in degrees.
 OUTPUT_DPI = 240
-SHOW_FIGURE = True
+SHOW_FIGURE = False
 
 
 def plot_model_pair(ax, points, labels, color, line_width=1.8, zorder=3):
@@ -75,55 +80,55 @@ def plot_model_pair(ax, points, labels, color, line_width=1.8, zorder=3):
 
 
 def main():
-    # PoseG is deliberately dark; Pose and Seg use lighter colors.
+    # PoseFall is deliberately dark because it is the selected route.
     colors = {
-        "Pose": "#9CC9E2",
-        "Seg": "#A9D9C0",
-        "PoseG": "#123B73",
+        "PoseFall": "#123B73",
+        "SegmentFall": "#A9D9C0",
+        "PoseGFall": "#9CC9E2",
     }
 
     series = {
-        "Pose": {
+        "PoseFall": {
             "points": [
                 (pose_n_latency, pose_n_size, pose_n_map),
                 (pose_s_latency, pose_s_size, pose_s_map),
             ],
-            "labels": ["Pose-n", "Pose-s"],
+            "labels": ["PoseFall-n (selected)", "PoseFall-s"],
         },
-        "Seg": {
+        "SegmentFall": {
             "points": [
                 (seg_n_latency, seg_n_size, seg_n_map),
                 (seg_s_latency, seg_s_size, seg_s_map),
             ],
-            "labels": ["Seg-n", "Seg-s"],
+            "labels": ["SegmentFall-n", "SegmentFall-s"],
         },
-        "PoseG": {
+        "PoseGFall": {
             "points": [
                 (poseg_n_latency, poseg_n_size, poseg_n_map),
                 (poseg_s_latency, poseg_s_size, poseg_s_map),
             ],
-            "labels": ["PoseG-n", "PoseG-s"],
+            "labels": ["PoseGFall-n", "PoseGFall-s"],
         },
     }
 
     fig = plt.figure(figsize=(10.5, 7.2), constrained_layout=True)
     ax = fig.add_subplot(111, projection="3d")
 
-    # Draw light series first, then the dark PoseG series on top.
-    for name in ("Pose", "Seg", "PoseG"):
+    # Draw light series first, then the selected dark PoseFall series on top.
+    for name in ("SegmentFall", "PoseGFall", "PoseFall"):
         plot_model_pair(
             ax,
             series[name]["points"],
             series[name]["labels"],
             colors[name],
-            line_width=2.4 if name == "PoseG" else 1.7,
-            zorder=5 if name == "PoseG" else 3,
+            line_width=2.4 if name == "PoseFall" else 1.7,
+            zorder=5 if name == "PoseFall" else 3,
         )
 
-    ax.set_xlabel("Inference latency (ms/image)", labelpad=12)
-    ax.set_ylabel("Model size (M parameters)", labelpad=12)
-    ax.set_zlabel("Competition MAP (%)", labelpad=10)
-    ax.set_title("Fall-detection Model Trade-off", fontsize=15, weight="bold", pad=18)
+    ax.set_xlabel("Front-end kernel latency (ms/image)", labelpad=12)
+    ax.set_ylabel("Total parameters (M)", labelpad=12)
+    ax.set_zlabel("Internal-val competition MAP (%)", labelpad=10)
+    ax.set_title("Fall-detection Representation Route Trade-off", fontsize=15, weight="bold", pad=18)
 
     # Add data-dependent padding so labels at the minimum/maximum values are
     # not clipped against the 3D axes after real measurements are inserted.
@@ -158,10 +163,10 @@ def main():
             color=colors[name],
             marker="o",
             markersize=5,
-            linewidth=2.4 if name == "PoseG" else 1.7,
+            linewidth=2.4 if name == "PoseFall" else 1.7,
             label=name,
         )
-        for name in ("Pose", "Seg", "PoseG")
+        for name in ("PoseFall", "SegmentFall", "PoseGFall")
     ]
     ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(0.02, 0.96), frameon=True)
 

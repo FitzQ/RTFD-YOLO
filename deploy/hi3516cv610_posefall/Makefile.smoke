@@ -1,0 +1,20 @@
+SDK ?= /developer14/hefei/Hi3516CV610
+TOOLCHAIN ?= /developer14/hefei/toolchains/openeuler_gcc_arm32le-musl/bin
+CC := $(TOOLCHAIN)/arm-openeuler-linux-musleabi-gcc
+
+CFLAGS := -O3 -Wall -Wextra -mthumb -mcpu=cortex-a7
+CFLAGS += -mfloat-abi=softfp -mfpu=neon-vfpv4
+CFLAGS += -I$(SDK)/soc/include -I$(SDK)/soc/config/gcc
+BOARD_LIB_DIR ?= $(CURDIR)/board_libs
+LDFLAGS := -L$(BOARD_LIB_DIR) -Wl,-rpath,/lib -Wl,--gc-sections
+LDLIBS := -Wl,--no-as-needed -lsvp_acl -lss_mpi -lss_mpi_sysmem
+LDLIBS += -lprotobuf-c -lot_osal -lsecurec -lm
+
+.PHONY: all clean
+all: posefall_om_smoke
+
+posefall_om_smoke: posefall_om_smoke.c
+	$(CC) $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -o $@
+
+clean:
+	rm -f posefall_om_smoke output_*.bin

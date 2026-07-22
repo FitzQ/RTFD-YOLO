@@ -1,0 +1,9 @@
+Net Id, Layer Id,Profile Layer Id,Layer Name,Layer Type,DLD DDR Read(byte),DSTR DDR Write(byte),WLD DDR Read(byte),Original Ops(Times),Core Ops(Times)
+NetNnn0,Total,--,--,--,13440,16,434208,868416,6950912
+NetNnn0,Layer0,0,features,Preprocess,13440,0,0,0,0
+NetNnn0,Layer1,1,/model/net/net.0/Flatten,Reshape,0,0,0,0,0
+NetNnn0,Layer2,2,/model/net/net.1/Gemm,Gemm,0,0,430080,860160,6881280
+NetNnn0,Layer3,3,/model/net/net.3/Gemm,Gemm,0,0,4096,8192,65536
+NetNnn0,Layer4,4,/model/net/net.5/Gemm,Gemm,0,0,32,64,4096
+NetNnn0,Layer5,5,/Sigmoid,VectorCombine,0,0,0,0,0
+NetNnn0,Layer6,5,/Sigmoid_report_0_0,Reportop,0,16,0,0,0
