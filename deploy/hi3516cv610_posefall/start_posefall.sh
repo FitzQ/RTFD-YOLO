@@ -3,13 +3,8 @@ set -u
 
 BASE=/root/posefall
 MODEL="$BASE/pose_yolo_camera_yvu_fp16v.om"
-# The versioned yolo26n-posefall-2 Transformer is exposed through the default
-# posefall_head_picovision.om symlink. Roll back explicitly without replacing it:
-#   POSEFALL_HEAD_MODEL="$BASE/posefall_head_picovision_train6.om" ./start_posefall.sh
-# The MLP remains an emergency compatibility fallback only:
-#   POSEFALL_HEAD_MODEL="$BASE/posefall_head_mlp.om" ./start_posefall.sh
 HEAD_MODEL="${POSEFALL_HEAD_MODEL:-$BASE/posefall_head_picovision.om}"
-DETECTOR="$BASE/posefall_detector"
+DETECTOR="$BASE/posefall_predict"
 RTSP_SERVER="$BASE/fixed_rtsp_server"
 
 if [ ! -x "$DETECTOR" ] || [ ! -s "$MODEL" ] || [ ! -s "$HEAD_MODEL" ] ||
@@ -49,14 +44,18 @@ if ! pidof fixed_rtsp_server >/dev/null 2>&1; then
     exit 4
 fi
 
-old_pid="$(pidof posefall_detector 2>/dev/null || true)"
+old_pid="$(pidof posefall_predict 2>/dev/null || true) $(pidof posefall_detector 2>/dev/null || true)"
 if [ -n "$old_pid" ]; then
     kill -TERM $old_pid 2>/dev/null || true
     sleep 2
 fi
 
 : > /run/posefall.log
-"$DETECTOR" "$MODEL" "$HEAD_MODEL" > /run/posefall.log 2>&1 &
+"$DETECTOR" \
+    --source camera \
+    --source-fps 30 \
+    --pose "$MODEL" \
+    --head "$HEAD_MODEL" > /run/posefall.log 2>&1 &
 echo $! > /run/posefall.pid
 sleep 2
 

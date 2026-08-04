@@ -1,6 +1,6 @@
 # Hi3516CV610 PoseFall deployment
 
-## Verified version (2026-07-22, V1.3)
+## Verified version (2026-07-29, V1.4)
 
 The competition-document result now uses
 `runs/posefall/yolo26n-posefall-2/weights/best.pt` (SHA256
@@ -8,9 +8,7 @@ The competition-document result now uses
 That checkpoint has now been converted and retested on the board. An elementwise
 checkpoint audit found all 879 pose-front-end tensors identical to the previous
 checkpoint, so the verified camera Pose OM is reused. All 48 Transformer-head
-tensors changed and were exported into a new head OM. The old `train-6/best.pt`
-results (SHA256 `a34689b5b1052cf8da94f158bdeda042f8d14612e3c9309eab6934f0cb4a8b48`)
-remain only as explicitly labelled historical comparisons.
+tensors changed and were exported into the current head OM.
 
 The board pipeline is:
 
@@ -28,7 +26,7 @@ The board pipeline is:
 The temporal head preserves the original trained 3-layer Transformer and its
 weights. It is exported in the PicoVision CHW/Conv form required by the CV610;
 the generic ONNX-to-OM graph is not used because that graph causes an AICore
-timeout. `posefall_head_mlp.om` remains on the board only as a fallback.
+timeout.
 
 The new checkpoint passed these checks:
 
@@ -43,21 +41,34 @@ The new checkpoint passed these checks:
 The last item proves stable loading and continuous empty-scene inference. It is
 not a person-present fall event and not a same-frame end-to-end latency result.
 
-The current board C runtime is intentionally a fixed-camera, single-primary-
-person implementation: from the 8400 pose candidates it uses only the
-highest-confidence person. It does not run NMS, BoT-SORT, or persistent ID
-tracking on the ARM CPU. The Python reference runtime supports tracked
-multi-person histories, but that capability must not be attributed to the
-current board binary.
+The board runtime now preserves the end-to-end `PoseFallPredictor` semantics:
 
-See `POSEFALL_PT_TO_HI3516CV610.md` for the complete PT-to-board
-conversion, numerical validation, ATC hardening, smoke-test, and rollback steps.
+- pose confidence threshold `0.1` and IoU NMS threshold `0.7`;
+- up to 32 people after NMS;
+- BoT-SORT with `fall_botsort.yaml` thresholds, score-fused IoU, the
+  `KalmanFilterXYWH` state model, high/low-confidence two-stage association,
+  unconfirmed/lost/removed track lifecycle, and persistent IDs;
+- `gmc_method=none` and `with_reid=False`, exactly as configured by the
+  project, so no omitted GMC or ReID network exists;
+- one independent 60x56 history per ID, resampled to 30 FPS with the same
+  repeat-previous rule and 0.5 s reset gap as `append_resampled_feature`;
+- Transformer Head inference on every valid tracked person in every processed
+  frame, with direct `probability >= 0.5` classification and no stride or
+  hysteresis.
+
+The C `KalmanFilterXYWH` implementation was checked by feeding the board's raw
+detections back into the Python `BOTSORT`: IDs agreed on every checked frame,
+and the maximum tracked-box coordinate error over the five-frame numerical
+check was about 0.002 pixels.
+
+See `POSEFALL_EXPORT_AND_DEPLOY.md` for the current PT-to-board conversion,
+directory layout, numerical validation, and deployment steps.
 
 ## Build
 
 ```sh
 cd /developer14/hefei/ultralytics/deploy/hi3516cv610_posefall
-make -f Makefile.posefall_detector
+make -f Makefile.posefall_predict
 ```
 
 ## Board usage
@@ -67,13 +78,34 @@ make -f Makefile.posefall_detector
 tail -f /run/posefall.log
 ```
 
-The original Transformer is the default. The MLP is an explicit emergency
-fallback only:
+The predictor also accepts a source directly:
 
 ```sh
-POSEFALL_HEAD_MODEL=/root/posefall/posefall_head_mlp.om \
-  /root/posefall/start_posefall.sh
+# Camera
+/root/posefall/posefall_predict \
+  --source camera \
+  --pose /root/posefall/pose_yolo_camera_yvu_fp16v.om \
+  --head /root/posefall/posefall_head_picovision.om
+
+# Video (or a preconverted 640x640 NV21 stream)
+POSEFALL_FFMPEG=/root/posefall/ffmpeg \
+/root/posefall/posefall_predict \
+  --source /mnt/usb/test.mp4 \
+  --source-fps 30 \
+  --pose /root/posefall/pose_yolo_camera_yvu_fp16v.om \
+  --head /root/posefall/posefall_head_picovision.om \
+  --trace /mnt/usb/test_trace.csv
 ```
+
+Container video is decoded and letterboxed before the OMs are loaded because
+the board exposes only about 33 MiB of Linux memory. The temporary
+`<source>.posefall_640.nv21` is created beside the video and deleted on exit;
+therefore use USB/SD storage for a complete video. A 640x360 MPEG-4 test clip
+ran successfully. A 1280x720 H.264 software decode exceeded this board image's
+memory limit before model loading, so high-resolution inputs should be
+pre-scaled to at most 640p. Container FPS is detected automatically;
+`--source-fps` is an optional override. Raw `.nv21` input bypasses FFmpeg and
+defaults to 30 FPS unless overridden.
 
 For the verified direct link, open
 `rtsp://169.254.131.168:554/live.h264` from the PC at
